@@ -16,6 +16,13 @@
 static struct blob_buf b;
 static struct ubus_context *ctx;
 
+int refmetric = 0;
+
+struct ids_list_entry {
+  struct list_head list;
+  char *id;
+};
+
 enum {
   ROUTE_TABLE_IPV4,
   ROUTE_TABLE_IPV6,
@@ -49,6 +56,8 @@ static void exit_utils() {
 static void ubus_get_routes_cb(struct ubus_request *req, int type,
                                struct blob_attr *msg) {
   struct blob_attr *tb[__ROUTE_TABLE_MAX];
+  LIST_HEAD(idlist);
+
   blobmsg_parse(babeld_policy, __ROUTE_TABLE_MAX, tb, blob_data(msg),
                 blob_len(msg));
 
@@ -76,22 +85,28 @@ static void ubus_get_routes_cb(struct ubus_request *req, int type,
     struct blob_attr *tb_route[__ROUTE_MAX];
     blobmsg_parse(route_policy, __ROUTE_MAX, tb_route, blobmsg_data(attr),
                   blobmsg_data_len(attr));
-    printf("id: %s\n", blobmsg_get_string(tb_route[ROUTE_ID]));
+    int metric = blobmsg_get_u32(tb_route[ROUTE_ROUTE_METRIC]);
+    if (metric < refmetric) {
+      struct ids_list_entry *id = calloc(1, sizeof(struct ids_list_entry));
+      printf("id: %s\n", blobmsg_get_string(tb_route[ROUTE_ID]));
+      id->id = blobmsg_get_string(tb_route[ROUTE_ID]);
+      list_add(&id->list, &idlist);
+    }
   }
 
   exit_utils();
 }
 
 static int handle_routes() {
-  int ret;
-
   u_int32_t id;
+  int ret;
+  int timeout = 1;
+
   if (ubus_lookup_id(ctx, "babeld", &id)) {
     fprintf(stderr, "Failed to look up test object for %s\n", "babeld");
     return -1;
   }
 
-  int timeout = 1;
   blob_buf_init(&b, 0);
   ret = ubus_invoke(ctx, id, "get_routes", b.head, ubus_get_routes_cb, NULL,
                     timeout * 1000);
@@ -133,7 +148,7 @@ int main(int argc, char **argv) {
   while ((opt = getopt_long(argc, argv, "f", longopts, &option_index)) != -1) {
     switch (opt) {
     case OPT_GATEWAYS:
-      fprintf(stdout, "Gateways %s\n", optarg);
+      refmetric = atoi(optarg);
       handle_routes();
     default:
       return 1;
