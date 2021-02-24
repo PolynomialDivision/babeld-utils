@@ -17,7 +17,7 @@ include $(INCLUDE_DIR)/cmake.mk
 define Package/babeld-utils
   SECTION:=net
   CATEGORY:=Network
-  TITLE:=Babel Utils
+  TITLE:=Babeld Utils
   URL:=https://github.com/PolynomialDivision/babeld-utils.git
   DEPENDS:=+libubus +libubox +libblobmsg-json +libowipcalc
 endef

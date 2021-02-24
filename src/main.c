@@ -11,18 +11,19 @@
 
 #include <owipcalc.h>
 
-//static struct blob_buf b;
+// static struct blob_buf b;
 static struct ubus_context *ctx;
 
-/*
 enum {
+  ROUTE_IPV4,
+  ROUTE_IPV6,
   __ROUTE_MAX,
 };
 
 static const struct blobmsg_policy babeld_policy[__ROUTE_MAX] = {
-    // [ROUTE_IPV6] = {.name = "IPv6", .type = BLOBMSG_TYPE_STRING},
+    [ROUTE_IPV4] = {.name = "IPv4", .type = BLOBMSG_TYPE_TABLE},
+    [ROUTE_IPV6] = {.name = "IPv6", .type = BLOBMSG_TYPE_TABLE},
 };
-*/
 
 static void exit_utils() {
   ubus_free(ctx);
@@ -31,11 +32,30 @@ static void exit_utils() {
 
 static void ubus_get_routes_cb(struct ubus_request *req, int type,
                                struct blob_attr *msg) {
+  struct blob_attr *tb[__ROUTE_MAX];
+
+  blobmsg_parse(babeld_policy, __ROUTE_MAX, tb, blob_data(msg), blob_len(msg));
+  if (!tb[ROUTE_IPV6])
+    return;
+
+  struct blob_attr *attr;
+  struct blobmsg_hdr *hdr;
+  int len;
+  __blob_for_each_attr(attr, blobmsg_data(tb[ROUTE_IPV6]), len) {
+    hdr = blob_data(attr);
+    char *dst_prefix = (char *)hdr->name;
+
+    printf("Dst Prefix: %s\n", dst_prefix);
+
+    //struct cidr *b;
+    //b = cidr_parse6(dst_prefix);
+  }
+
   exit_utils();
 }
 
 static int handle_routes() {
-  int ret;
+  int ret;  
 
   u_int32_t id;
   if (ubus_lookup_id(ctx, "babeld", &id)) {
