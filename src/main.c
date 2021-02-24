@@ -11,51 +11,70 @@
 
 #include <owipcalc.h>
 
-// static struct blob_buf b;
+static struct blob_buf b;
 static struct ubus_context *ctx;
 
 enum {
-  ROUTE_IPV4,
-  ROUTE_IPV6,
+  ROUTE_TABLE_IPV4,
+  ROUTE_TABLE_IPV6,
+  __ROUTE_TABLE_MAX,
+};
+
+static const struct blobmsg_policy babeld_policy[__ROUTE_TABLE_MAX] = {
+    [ROUTE_TABLE_IPV4] = {.name = "IPv4", .type = BLOBMSG_TYPE_TABLE},
+    [ROUTE_TABLE_IPV6] = {.name = "IPv6", .type = BLOBMSG_TYPE_TABLE},
+};
+
+enum {
+  ROUTE_SRC_PREFIX,
+  ROUTE_ROUTE_METRIC,
+  ROUTE_ID,
   __ROUTE_MAX,
 };
 
-static const struct blobmsg_policy babeld_policy[__ROUTE_MAX] = {
-    [ROUTE_IPV4] = {.name = "IPv4", .type = BLOBMSG_TYPE_TABLE},
-    [ROUTE_IPV6] = {.name = "IPv6", .type = BLOBMSG_TYPE_TABLE},
+static const struct blobmsg_policy route_policy[__ROUTE_MAX] = {
+    [ROUTE_SRC_PREFIX] = {.name = "src-prefix", .type = BLOBMSG_TYPE_STRING},
+    [ROUTE_ROUTE_METRIC] = {.name = "route_metric",
+                            .type = BLOBMSG_TYPE_STRING},
+    [ROUTE_ID] = {.name = "id", .type = BLOBMSG_TYPE_STRING},
 };
 
 static void exit_utils() {
-  ubus_free(ctx);
   uloop_done();
+  exit(0);
 }
 
 static void ubus_get_routes_cb(struct ubus_request *req, int type,
                                struct blob_attr *msg) {
-  struct blob_attr *tb[__ROUTE_MAX];
+  struct blob_attr *tb[__ROUTE_TABLE_MAX];
+  blobmsg_parse(babeld_policy, __ROUTE_TABLE_MAX, tb, blob_data(msg),
+                blob_len(msg));
 
-  blobmsg_parse(babeld_policy, __ROUTE_MAX, tb, blob_data(msg), blob_len(msg));
-  if (!tb[ROUTE_IPV6])
+  if (!tb[ROUTE_TABLE_IPV6]) {
     return;
+  }
 
   struct blob_attr *attr;
   struct blobmsg_hdr *hdr;
-  int len;
-  __blob_for_each_attr(attr, blobmsg_data(tb[ROUTE_IPV6]), len) {
+  int len = blobmsg_data_len(tb[ROUTE_TABLE_IPV6]);
+  __blob_for_each_attr(attr, blobmsg_data(tb[ROUTE_TABLE_IPV6]), len) {
     hdr = blob_data(attr);
     char *dst_prefix = (char *)hdr->name;
-
     printf("Dst Prefix: %s\n", dst_prefix);
+    // struct cidr *b;
+    // b = cidr_parse6(dst_prefix);
 
-    //struct cidr *b;
-    //b = cidr_parse6(dst_prefix);
+    struct blob_attr *tb_route[__ROUTE_MAX];
+    blobmsg_parse(route_policy, __ROUTE_MAX, tb_route, blobmsg_data(attr),
+                  blobmsg_data_len(attr));
+    printf("id: %s\n", blobmsg_get_string(tb_route[ROUTE_ID]));
   }
 
   exit_utils();
 }
 
 static int handle_routes() {
-  int ret;  
+  int ret;
 
   u_int32_t id;
   if (ubus_lookup_id(ctx, "babeld", &id)) {
@@ -64,7 +83,8 @@ static int handle_routes() {
   }
 
   int timeout = 1;
-  ret = ubus_invoke(ctx, id, "get_routes", NULL, ubus_get_routes_cb, NULL,
+  blob_buf_init(&b, 0);
+  ret = ubus_invoke(ctx, id, "get_routes", b.head, ubus_get_routes_cb, NULL,
                     timeout * 1000);
   if (ret)
     fprintf(stderr, "Failed to invoke: %s\n", ubus_strerror(ret));
@@ -83,9 +103,13 @@ int main(int argc, char **argv) {
     return -1;
   }
 
+  ubus_add_uloop(ctx);
+
   handle_routes();
 
   uloop_run();
+
+  ubus_free(ctx);
 
   return 0;
 }
