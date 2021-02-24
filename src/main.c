@@ -1,3 +1,4 @@
+#include <getopt.h>
 #include <linux/types.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -92,7 +93,7 @@ static int handle_routes() {
   return ret;
 }
 
-int main(int argc, char **argv) {
+static int init_ubus() {
   const char *ubus_socket = NULL;
 
   uloop_init();
@@ -105,7 +106,31 @@ int main(int argc, char **argv) {
 
   ubus_add_uloop(ctx);
 
-  handle_routes();
+  return 0;
+}
+
+int main(int argc, char **argv) {
+  int opt;
+  enum opt {
+    OPT_GATEWAYS,
+  };
+  static const struct option longopts[] = {
+      {.name = "gateways", .has_arg = required_argument, .val = OPT_GATEWAYS},
+      {},
+  };
+
+  init_ubus();
+
+  int option_index = 0;
+  while ((opt = getopt_long(argc, argv, "f", longopts, &option_index)) != -1) {
+    switch (opt) {
+    case OPT_GATEWAYS:
+      fprintf(stdout, "Gateways %s\n", optarg);
+      handle_routes();
+    default:
+      return 1;
+    }
+  }
 
   uloop_run();
 

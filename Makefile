@@ -19,7 +19,7 @@ define Package/babeld-utils
   CATEGORY:=Network
   TITLE:=Babeld Utils
   URL:=https://github.com/PolynomialDivision/babeld-utils.git
-  DEPENDS:=+libubus +libubox +libblobmsg-json +libowipcalc
+  DEPENDS:=+libubus +libubox +libblobmsg-json +libowipcalc +getopt
 endef
 
 define Package/babeld-utils/description
