@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <strings.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -61,6 +62,13 @@ static void ubus_get_routes_cb(struct ubus_request *req, int type,
   __blob_for_each_attr(attr, blobmsg_data(tb[ROUTE_TABLE_IPV6]), len) {
     hdr = blob_data(attr);
     char *dst_prefix = (char *)hdr->name;
+
+    if (!strncmp(dst_prefix, "::/0", 4)) {
+      printf("Gateway Announcent!\n");
+    } else {
+      printf("No Gateway!\n");
+    }
+
     printf("Dst Prefix: %s\n", dst_prefix);
     // struct cidr *b;
     // b = cidr_parse6(dst_prefix);
