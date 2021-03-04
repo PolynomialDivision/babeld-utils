@@ -345,12 +345,12 @@ static int init_ubus() {
 }
 
 static void print_help() {
-  printf("Usage: babeld-utils [CMD]\n");
-  printf("\t\t--ipv4\tuse ipv4\n");
-  printf("\t\t--gateways [metric]\tsearch for gateway ips\n");
-  printf("\t\t--announced [ip] [max prefix]\tcheck if a prefix is already "
+  printf("Usage: babeld-utils\n");
+  printf("\t--ipv4\t\t\t\tuse ipv4\n");
+  printf("\t--gateways [metric]\t\tsearch for gateway ips\n");
+  printf("\t--announced [ip] [max prefix]\tcheck if a prefix is already "
          "announced\n");
-  printf("\t\t--statistics\tshow babeld statistics\n");
+  printf("\t--statistics\t\t\tshow babeld statistics\n");
   exit_utils();
 }
 
