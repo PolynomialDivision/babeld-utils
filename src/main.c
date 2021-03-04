@@ -18,9 +18,13 @@ static struct ubus_context *ctx;
 
 int refmetric = 0;
 
+#define MAX_IPS 10
+
 struct ids_list_entry {
   struct list_head list;
   char *id;
+  char *gw_a;
+  char *ips[MAX_IPS];
 };
 
 enum {
@@ -43,8 +47,7 @@ enum {
 
 static const struct blobmsg_policy route_policy[__ROUTE_MAX] = {
     [ROUTE_SRC_PREFIX] = {.name = "src-prefix", .type = BLOBMSG_TYPE_STRING},
-    [ROUTE_ROUTE_METRIC] = {.name = "route_metric",
-                            .type = BLOBMSG_TYPE_STRING},
+    [ROUTE_ROUTE_METRIC] = {.name = "route_metric", .type = BLOBMSG_TYPE_INT32},
     [ROUTE_ID] = {.name = "id", .type = BLOBMSG_TYPE_STRING},
 };
 
@@ -53,9 +56,58 @@ static void exit_utils() {
   exit(0);
 }
 
-static void ubus_get_routes_cb(struct ubus_request *req, int type,
-                               struct blob_attr *msg) {
+static void clean_idlist(struct list_head *head) {
+  struct ids_list_entry *listentry, *tmp;
+  list_for_each_entry_safe(listentry, tmp, head, list) { free(listentry); }
+}
+
+static void print_idlist(struct list_head *head) {
+  struct ids_list_entry *listentry;
+  list_for_each_entry(listentry, head, list) {
+    printf("id: %s", listentry->id);
+    for (int i = 0; i < MAX_IPS; i++) {
+      if (listentry->ips[i]) {
+        printf(" %s", listentry->ips[i]);
+      }
+    }
+    printf("\n");
+  }
+}
+
+static int id_in_list(struct list_head *head, char *id) {
+  struct ids_list_entry *listentry;
+  list_for_each_entry(listentry, head, list) {
+    if (!strcmp(listentry->id, id)) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int add_ip_to_idlist(struct list_head *head, char *id, char *ip) {
+  struct ids_list_entry *listentry;
+  list_for_each_entry(listentry, head, list) {
+    if (!strcmp(listentry->id, id)) {
+      for (int i = 0; i < MAX_IPS; i++) {
+        if (listentry->ips[i] == NULL) {
+          listentry->ips[i] = ip;
+          return 1;
+        }
+      }
+    }
+  }
+
+  return 0;
+}
+
+static void ubus_get_gateways_cb(struct ubus_request *req, int type,
+                                 struct blob_attr *msg) {
   struct blob_attr *tb[__ROUTE_TABLE_MAX];
+  struct blob_attr *attr;
+  struct blobmsg_hdr *hdr;
+  int len;
+
   LIST_HEAD(idlist);
 
   blobmsg_parse(babeld_policy, __ROUTE_TABLE_MAX, tb, blob_data(msg),
@@ -65,39 +117,62 @@ static void ubus_get_routes_cb(struct ubus_request *req, int type,
     return;
   }
 
-  struct blob_attr *attr;
-  struct blobmsg_hdr *hdr;
-  int len = blobmsg_data_len(tb[ROUTE_TABLE_IPV6]);
+  // search for ids that announce a gateway
+  len = blobmsg_data_len(tb[ROUTE_TABLE_IPV6]);
   __blob_for_each_attr(attr, blobmsg_data(tb[ROUTE_TABLE_IPV6]), len) {
     hdr = blob_data(attr);
     char *dst_prefix = (char *)hdr->name;
 
     if (!strncmp(dst_prefix, "::/0", 4)) {
-      printf("Gateway Announcent!\n");
-    } else {
-      printf("No Gateway!\n");
+      struct blob_attr *tb_route[__ROUTE_MAX];
+      blobmsg_parse(route_policy, __ROUTE_MAX, tb_route, blobmsg_data(attr),
+                    blobmsg_data_len(attr));
+
+      int metric = 0;
+      if (tb_route[ROUTE_ROUTE_METRIC]) {
+        metric = blobmsg_get_u32(tb_route[ROUTE_ROUTE_METRIC]);
+      }
+
+      if (metric < refmetric) {
+        char *id_string = blobmsg_get_string(tb_route[ROUTE_ID]);
+        if (!id_in_list(&idlist, id_string)) {
+          struct ids_list_entry *id = calloc(1, sizeof(struct ids_list_entry));
+          id->id = id_string;
+          list_add(&id->list, &idlist);
+        }
+      }
     }
+  }
 
-    printf("Dst Prefix: %s\n", dst_prefix);
-    // struct cidr *b;
-    // b = cidr_parse6(dst_prefix);
-
+  // search for ips assigned to a gateway id
+  len = blobmsg_data_len(tb[ROUTE_TABLE_IPV6]);
+  __blob_for_each_attr(attr, blobmsg_data(tb[ROUTE_TABLE_IPV6]), len) {
     struct blob_attr *tb_route[__ROUTE_MAX];
     blobmsg_parse(route_policy, __ROUTE_MAX, tb_route, blobmsg_data(attr),
                   blobmsg_data_len(attr));
-    int metric = blobmsg_get_u32(tb_route[ROUTE_ROUTE_METRIC]);
-    if (metric < refmetric) {
-      struct ids_list_entry *id = calloc(1, sizeof(struct ids_list_entry));
-      printf("id: %s\n", blobmsg_get_string(tb_route[ROUTE_ID]));
-      id->id = blobmsg_get_string(tb_route[ROUTE_ID]);
-      list_add(&id->list, &idlist);
+    hdr = blob_data(attr);
+    char *dst_prefix = (char *)hdr->name;
+    if (strncmp(dst_prefix, "::/0", 4)) {
+      char *id_string = blobmsg_get_string(tb_route[ROUTE_ID]);
+      int metric = blobmsg_get_u32(tb_route[ROUTE_ROUTE_METRIC]);
+      if (metric < refmetric) {
+        if (id_in_list(&idlist, id_string)) {
+          add_ip_to_idlist(&idlist, id_string, dst_prefix);
+        }
+      }
     }
   }
+
+  // output
+  print_idlist(&idlist);
+
+  // cleanup
+  clean_idlist(&idlist);
 
   exit_utils();
 }
 
-static int handle_routes() {
+static int handle_gateways() {
   u_int32_t id;
   int ret;
   int timeout = 1;
@@ -108,7 +183,7 @@ static int handle_routes() {
   }
 
   blob_buf_init(&b, 0);
-  ret = ubus_invoke(ctx, id, "get_routes", b.head, ubus_get_routes_cb, NULL,
+  ret = ubus_invoke(ctx, id, "get_routes", b.head, ubus_get_gateways_cb, NULL,
                     timeout * 1000);
   if (ret)
     fprintf(stderr, "Failed to invoke: %s\n", ubus_strerror(ret));
@@ -149,7 +224,7 @@ int main(int argc, char **argv) {
     switch (opt) {
     case OPT_GATEWAYS:
       refmetric = atoi(optarg);
-      handle_routes();
+      handle_gateways();
     default:
       return 1;
     }
