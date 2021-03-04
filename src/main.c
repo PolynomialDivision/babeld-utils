@@ -17,6 +17,7 @@ static struct blob_buf b;
 static struct ubus_context *ctx;
 
 int refmetric = 0;
+int ipv4 = 0;
 
 #define MAX_IPS 30
 
@@ -101,11 +102,19 @@ static int add_ip_to_idlist(struct list_head *head, char *id, char *ip) {
   return 0;
 }
 
+static int is_gateway(char *dst) {
+  if (ipv4)
+    return !strcmp("0.0.0.0/0", dst);
+  else
+    return !strcmp("::/0", dst);
+}
+
 static void ubus_get_gateways_cb(struct ubus_request *req, int type,
                                  struct blob_attr *msg) {
   struct blob_attr *tb[__ROUTE_TABLE_MAX];
   struct blob_attr *attr;
   struct blobmsg_hdr *hdr;
+  struct blob_attr *iptable;
   int len;
 
   LIST_HEAD(idlist);
@@ -113,17 +122,23 @@ static void ubus_get_gateways_cb(struct ubus_request *req, int type,
   blobmsg_parse(babeld_policy, __ROUTE_TABLE_MAX, tb, blob_data(msg),
                 blob_len(msg));
 
-  if (!tb[ROUTE_TABLE_IPV6]) {
+  if (!tb[ROUTE_TABLE_IPV4] || !tb[ROUTE_TABLE_IPV6]) {
     return;
   }
 
+  if (ipv4) {
+    iptable = tb[ROUTE_TABLE_IPV4];
+  } else {
+    iptable = tb[ROUTE_TABLE_IPV6];
+  }
+
   // search for ids that announce a gateway
-  len = blobmsg_data_len(tb[ROUTE_TABLE_IPV6]);
-  __blob_for_each_attr(attr, blobmsg_data(tb[ROUTE_TABLE_IPV6]), len) {
+  len = blobmsg_data_len(iptable);
+  __blob_for_each_attr(attr, blobmsg_data(iptable), len) {
     hdr = blob_data(attr);
     char *dst_prefix = (char *)hdr->name;
 
-    if (!strncmp(dst_prefix, "::/0", 4)) { // for now we only search for ipv6
+    if (is_gateway(dst_prefix)) { // for now we only search for ipv6
       struct blob_attr *tb_route[__ROUTE_MAX];
       blobmsg_parse(route_policy, __ROUTE_MAX, tb_route, blobmsg_data(attr),
                     blobmsg_data_len(attr));
@@ -145,14 +160,14 @@ static void ubus_get_gateways_cb(struct ubus_request *req, int type,
   }
 
   // search for ips assigned to a gateway id
-  len = blobmsg_data_len(tb[ROUTE_TABLE_IPV6]);
-  __blob_for_each_attr(attr, blobmsg_data(tb[ROUTE_TABLE_IPV6]), len) {
+  len = blobmsg_data_len(iptable);
+  __blob_for_each_attr(attr, blobmsg_data(iptable), len) {
     struct blob_attr *tb_route[__ROUTE_MAX];
     blobmsg_parse(route_policy, __ROUTE_MAX, tb_route, blobmsg_data(attr),
                   blobmsg_data_len(attr));
     hdr = blob_data(attr);
     char *dst_prefix = (char *)hdr->name;
-    if (strncmp(dst_prefix, "::/0", 4)) {
+    if (!is_gateway(dst_prefix)) {
       char *id_string = blobmsg_get_string(tb_route[ROUTE_ID]);
       int metric = blobmsg_get_u32(tb_route[ROUTE_ROUTE_METRIC]);
       if (metric < refmetric) {
@@ -209,6 +224,7 @@ static int init_ubus() {
 
 static void print_help() {
   printf("Usage: babeld-utils [CMD]\n");
+  printf("\t\t--ipv4\tuse ipv4\n");
   printf("\t\t--gateways [metric]\tsearch for gateway ips\n");
   exit_utils();
 }
@@ -216,9 +232,11 @@ static void print_help() {
 int main(int argc, char **argv) {
   int opt;
   enum opt {
+    OPT_IPV4,
     OPT_GATEWAYS,
   };
   static const struct option longopts[] = {
+      {.name = "ipv4", .has_arg = no_argument, .val = OPT_IPV4},
       {.name = "gateways", .has_arg = required_argument, .val = OPT_GATEWAYS},
   };
 
@@ -227,9 +245,13 @@ int main(int argc, char **argv) {
   int option_index = 0;
   while ((opt = getopt_long(argc, argv, "f", longopts, &option_index)) != -1) {
     switch (opt) {
+    case OPT_IPV4:
+      ipv4 = 1;
+      break;
     case OPT_GATEWAYS:
       refmetric = atoi(optarg);
       handle_gateways();
+      break;
     default:
       print_help();
     }
