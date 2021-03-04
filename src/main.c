@@ -74,7 +74,7 @@ static void print_idlist(struct list_head *head) {
   }
 }
 
-static int id_in_list(struct list_head *head, char *id) {
+static int id_in_idlist(struct list_head *head, char *id) {
   struct ids_list_entry *listentry;
   list_for_each_entry(listentry, head, list) {
     if (!strcmp(listentry->id, id)) {
@@ -135,7 +135,7 @@ static void ubus_get_gateways_cb(struct ubus_request *req, int type,
 
       if (metric < refmetric) {
         char *id_string = blobmsg_get_string(tb_route[ROUTE_ID]);
-        if (!id_in_list(&idlist, id_string)) {
+        if (!id_in_idlist(&idlist, id_string)) {
           struct ids_list_entry *id = calloc(1, sizeof(struct ids_list_entry));
           id->id = id_string;
           list_add(&id->list, &idlist);
@@ -156,7 +156,7 @@ static void ubus_get_gateways_cb(struct ubus_request *req, int type,
       char *id_string = blobmsg_get_string(tb_route[ROUTE_ID]);
       int metric = blobmsg_get_u32(tb_route[ROUTE_ROUTE_METRIC]);
       if (metric < refmetric) {
-        if (id_in_list(&idlist, id_string)) {
+        if (id_in_idlist(&idlist, id_string)) {
           add_ip_to_idlist(&idlist, id_string, dst_prefix);
         }
       }
