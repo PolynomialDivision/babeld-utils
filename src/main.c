@@ -18,7 +18,7 @@ static struct ubus_context *ctx;
 
 int refmetric = 0;
 
-#define MAX_IPS 10
+#define MAX_IPS 30
 
 struct ids_list_entry {
   struct list_head list;
@@ -52,7 +52,7 @@ static const struct blobmsg_policy route_policy[__ROUTE_MAX] = {
 };
 
 static void exit_utils() {
-  uloop_done();
+  ubus_free(ctx);
   exit(0);
 }
 
@@ -64,7 +64,7 @@ static void clean_idlist(struct list_head *head) {
 static void print_idlist(struct list_head *head) {
   struct ids_list_entry *listentry;
   list_for_each_entry(listentry, head, list) {
-    printf("id: %s", listentry->id);
+    printf("ID: %s IPs:", listentry->id);
     for (int i = 0; i < MAX_IPS; i++) {
       if (listentry->ips[i]) {
         printf(" %s", listentry->ips[i]);
@@ -123,7 +123,7 @@ static void ubus_get_gateways_cb(struct ubus_request *req, int type,
     hdr = blob_data(attr);
     char *dst_prefix = (char *)hdr->name;
 
-    if (!strncmp(dst_prefix, "::/0", 4)) {
+    if (!strncmp(dst_prefix, "::/0", 4)) { // for now we only search for ipv6
       struct blob_attr *tb_route[__ROUTE_MAX];
       blobmsg_parse(route_policy, __ROUTE_MAX, tb_route, blobmsg_data(attr),
                     blobmsg_data_len(attr));
@@ -207,6 +207,12 @@ static int init_ubus() {
   return 0;
 }
 
+static void print_help() {
+  printf("Usage: babeld-utils [CMD]\n");
+  printf("\t\t--gateways [metric]\tsearch for gateway ips\n");
+  exit_utils();
+}
+
 int main(int argc, char **argv) {
   int opt;
   enum opt {
@@ -214,7 +220,6 @@ int main(int argc, char **argv) {
   };
   static const struct option longopts[] = {
       {.name = "gateways", .has_arg = required_argument, .val = OPT_GATEWAYS},
-      {},
   };
 
   init_ubus();
@@ -226,13 +231,9 @@ int main(int argc, char **argv) {
       refmetric = atoi(optarg);
       handle_gateways();
     default:
-      return 1;
+      print_help();
     }
   }
-
-  uloop_run();
-
-  ubus_free(ctx);
 
   return 0;
 }
