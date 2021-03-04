@@ -18,6 +18,8 @@ static struct ubus_context *ctx;
 
 int refmetric = 0;
 int ipv4 = 0;
+int max_prefix = 0;
+struct cidr prefix;
 
 #define MAX_IPS 30
 
@@ -187,6 +189,55 @@ static void ubus_get_gateways_cb(struct ubus_request *req, int type,
   exit_utils();
 }
 
+static void ubus_announced_cb(struct ubus_request *req, int type,
+                              struct blob_attr *msg) {
+  struct blob_attr *tb[__ROUTE_TABLE_MAX];
+  struct blob_attr *attr;
+  struct blobmsg_hdr *hdr;
+  struct blob_attr *iptable;
+  int len;
+
+  LIST_HEAD(idlist);
+
+  blobmsg_parse(babeld_policy, __ROUTE_TABLE_MAX, tb, blob_data(msg),
+                blob_len(msg));
+
+  if (!tb[ROUTE_TABLE_IPV4] || !tb[ROUTE_TABLE_IPV6]) {
+    return;
+  }
+
+  if (ipv4) {
+    iptable = tb[ROUTE_TABLE_IPV4];
+  } else {
+    iptable = tb[ROUTE_TABLE_IPV6];
+  }
+
+  // search for ids that announce a gateway
+  len = blobmsg_data_len(iptable);
+  __blob_for_each_attr(attr, blobmsg_data(iptable), len) {
+    hdr = blob_data(attr);
+    char *dst_prefix = (char *)hdr->name;
+    struct cidr *compare;
+
+    if (ipv4) {
+      compare = cidr_parse4(dst_prefix);
+      if (cidr_contains4(compare, &prefix) && compare->prefix >= max_prefix) {
+        printf("1\n");
+        exit_utils();
+      }
+    } else {
+      compare = cidr_parse6(dst_prefix);
+      if (cidr_contains6(compare, &prefix) && compare->prefix >= max_prefix) {
+        printf("1\n");
+        exit_utils();
+      }
+    }
+  }
+
+  printf("0\n");
+  exit_utils();
+}
+
 static int handle_gateways() {
   u_int32_t id;
   int ret;
@@ -204,6 +255,32 @@ static int handle_gateways() {
     fprintf(stderr, "Failed to invoke: %s\n", ubus_strerror(ret));
 
   return ret;
+}
+
+static int handle_announced(char *p, int max) {
+  u_int32_t id;
+  int ret;
+  int timeout = 1;
+
+  if (ipv4)
+    prefix = *cidr_parse4(p);
+  else
+    prefix = *cidr_parse6(p);
+
+  max_prefix = max;
+
+  if (ubus_lookup_id(ctx, "babeld", &id)) {
+    fprintf(stderr, "Failed to look up test object for %s\n", "babeld");
+    return -1;
+  }
+
+  blob_buf_init(&b, 0);
+  ret = ubus_invoke(ctx, id, "get_routes", b.head, ubus_announced_cb, NULL,
+                    timeout * 1000);
+  if (ret)
+    fprintf(stderr, "Failed to invoke: %s\n", ubus_strerror(ret));
+
+  return 0;
 }
 
 static int init_ubus() {
@@ -226,6 +303,7 @@ static void print_help() {
   printf("Usage: babeld-utils [CMD]\n");
   printf("\t\t--ipv4\tuse ipv4\n");
   printf("\t\t--gateways [metric]\tsearch for gateway ips\n");
+  printf("\t\t--announced [ip] [max prefix]\tsearch for gateway ips\n");
   exit_utils();
 }
 
@@ -234,10 +312,12 @@ int main(int argc, char **argv) {
   enum opt {
     OPT_IPV4,
     OPT_GATEWAYS,
+    OPT_ANNOUNCED,
   };
   static const struct option longopts[] = {
       {.name = "ipv4", .has_arg = no_argument, .val = OPT_IPV4},
       {.name = "gateways", .has_arg = required_argument, .val = OPT_GATEWAYS},
+      {.name = "announced", .has_arg = required_argument, .val = OPT_ANNOUNCED},
   };
 
   init_ubus();
@@ -251,6 +331,9 @@ int main(int argc, char **argv) {
     case OPT_GATEWAYS:
       refmetric = atoi(optarg);
       handle_gateways();
+      break;
+    case OPT_ANNOUNCED:
+      handle_announced(optarg, atoi(argv[optind]));
       break;
     default:
       print_help();
