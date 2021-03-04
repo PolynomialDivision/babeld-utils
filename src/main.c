@@ -197,8 +197,6 @@ static void ubus_announced_cb(struct ubus_request *req, int type,
   struct blob_attr *iptable;
   int len;
 
-  LIST_HEAD(idlist);
-
   blobmsg_parse(babeld_policy, __ROUTE_TABLE_MAX, tb, blob_data(msg),
                 blob_len(msg));
 
@@ -283,6 +281,53 @@ static int handle_announced(char *p, int max) {
   return 0;
 }
 
+static void ubus_routes_statistics_cb(struct ubus_request *req, int type,
+                                      struct blob_attr *msg) {
+  struct blob_attr *tb[__ROUTE_TABLE_MAX];
+
+  blobmsg_parse(babeld_policy, __ROUTE_TABLE_MAX, tb, blob_data(msg),
+                blob_len(msg));
+
+  if (!tb[ROUTE_TABLE_IPV4] || !tb[ROUTE_TABLE_IPV6]) {
+    return;
+  }
+
+  int numipv4routes = 0;
+  int numipv6routes = 0;
+
+  if (blob_pad_len(blobmsg_data(tb[ROUTE_TABLE_IPV4])))
+    numipv4routes = blobmsg_data_len(tb[ROUTE_TABLE_IPV4]) /
+                    blob_pad_len(blobmsg_data(tb[ROUTE_TABLE_IPV4]));
+
+  if (blob_pad_len(blobmsg_data(tb[ROUTE_TABLE_IPV6])))
+    numipv6routes = blobmsg_data_len(tb[ROUTE_TABLE_IPV6]) /
+                    blob_pad_len(blobmsg_data(tb[ROUTE_TABLE_IPV6]));
+
+  printf("Announced Routes - IPv4: %d IPv6: %d\n", numipv4routes,
+         numipv6routes);
+
+  exit_utils();
+}
+
+static int handle_statistics() {
+  u_int32_t id;
+  int ret;
+  int timeout = 1;
+
+  if (ubus_lookup_id(ctx, "babeld", &id)) {
+    fprintf(stderr, "Failed to look up test object for %s\n", "babeld");
+    return -1;
+  }
+
+  blob_buf_init(&b, 0);
+  ret = ubus_invoke(ctx, id, "get_routes", b.head, ubus_routes_statistics_cb,
+                    NULL, timeout * 1000);
+  if (ret)
+    fprintf(stderr, "Failed to invoke: %s\n", ubus_strerror(ret));
+
+  return 0;
+}
+
 static int init_ubus() {
   const char *ubus_socket = NULL;
 
@@ -303,7 +348,9 @@ static void print_help() {
   printf("Usage: babeld-utils [CMD]\n");
   printf("\t\t--ipv4\tuse ipv4\n");
   printf("\t\t--gateways [metric]\tsearch for gateway ips\n");
-  printf("\t\t--announced [ip] [max prefix]\tsearch for gateway ips\n");
+  printf("\t\t--announced [ip] [max prefix]\tcheck if a prefix is already "
+         "announced\n");
+  printf("\t\t--statistics\tshow babeld statistics\n");
   exit_utils();
 }
 
@@ -313,11 +360,13 @@ int main(int argc, char **argv) {
     OPT_IPV4,
     OPT_GATEWAYS,
     OPT_ANNOUNCED,
+    OPT_STATISTICS,
   };
   static const struct option longopts[] = {
       {.name = "ipv4", .has_arg = no_argument, .val = OPT_IPV4},
       {.name = "gateways", .has_arg = required_argument, .val = OPT_GATEWAYS},
       {.name = "announced", .has_arg = required_argument, .val = OPT_ANNOUNCED},
+      {.name = "statistics", .has_arg = no_argument, .val = OPT_STATISTICS},
   };
 
   init_ubus();
@@ -334,6 +383,9 @@ int main(int argc, char **argv) {
       break;
     case OPT_ANNOUNCED:
       handle_announced(optarg, atoi(argv[optind]));
+      break;
+    case OPT_STATISTICS:
+      handle_statistics();
       break;
     default:
       print_help();
