@@ -210,7 +210,6 @@ static void ubus_announced_cb(struct ubus_request *req, int type,
     iptable = tb[ROUTE_TABLE_IPV6];
   }
 
-  // search for ids that announce a gateway
   len = blobmsg_data_len(iptable);
   __blob_for_each_attr(attr, blobmsg_data(iptable), len) {
     hdr = blob_data(attr);
